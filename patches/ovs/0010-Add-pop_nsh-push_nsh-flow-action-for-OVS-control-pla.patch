@@ -1,0 +1,222 @@
+From 6feaf3b069f309fe128cb67db78f2dfa4bf1cacf Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 17:41:42 +0000
+Subject: [PATCH 10/11] Add "pop_nsh/push_nsh" flow action for OVS control
+ plane
+
+This patch adds pop_nsh and push_nsh Openflow actions to
+control plane, and these actions strip or append the NSH
+respectively. The data plane implementation is included
+in other patches.
+
+How to use:
+1) Flow rule for push_nsh:
+ovs-ofctl add-flow br-int "table=0, priority=260, \
+          in_port=1, ip, nw_src=192.168.0.1 \
+          actions=push_nsh,${Other actions}"
+2) Flow rule for pop_nsh
+ovs-ofctl add-flow br-int "table=0, priority=260, \
+in_port=xxx,actions=pop_nsh,{Other actions}"
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/include/openvswitch/ofp-actions.h b/include/openvswitch/ofp-actions.h
+index 0b8ccbb..46a3d4e 100644
+--- a/include/openvswitch/ofp-actions.h
++++ b/include/openvswitch/ofp-actions.h
+@@ -93,6 +93,10 @@
+     OFPACT(POP_QUEUE,       ofpact_null,        ofpact, "pop_queue")    \
+     OFPACT(FIN_TIMEOUT,     ofpact_fin_timeout, ofpact, "fin_timeout")  \
+                                                                         \
++    /* Network Service Header */                                        \
++    OFPACT(PUSH_NSH,        ofpact_null,        ofpact, "push_nsh")     \
++    OFPACT(POP_NSH,         ofpact_null,        ofpact, "pop_nsh")      \
++                                                                        \
+     /* Flow table interaction. */                                       \
+     OFPACT(RESUBMIT,        ofpact_resubmit,    ofpact, "resubmit")     \
+     OFPACT(LEARN,           ofpact_learn,       specs, "learn")         \
+diff --git a/lib/ofp-actions.c b/lib/ofp-actions.c
+index 997cc15..81f989a 100644
+--- a/lib/ofp-actions.c
++++ b/lib/ofp-actions.c
+@@ -304,6 +304,12 @@ enum ofp_raw_action_type {
+     /* NX1.0+(39): struct nx_action_output_trunc. */
+     NXAST_RAW_OUTPUT_TRUNC,
+ 
++    /* NX1.0+(40): void */
++    NXAST_RAW_PUSH_NSH,
++
++    /* NX1.0+(41): void */
++    NXAST_RAW_POP_NSH,
++
+ /* ## ------------------ ## */
+ /* ## Debugging actions. ## */
+ /* ## ------------------ ## */
+@@ -427,6 +433,8 @@ ofpact_next_flattened(const struct ofpact *ofpact)
+     case OFPACT_CLEAR_ACTIONS:
+     case OFPACT_WRITE_METADATA:
+     case OFPACT_GOTO_TABLE:
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
+     case OFPACT_NAT:
+         return ofpact_next(ofpact);
+ 
+@@ -1669,6 +1677,66 @@ format_PUSH_VLAN(const struct ofpact_null *a OVS_UNUSED, struct ds *s)
+     ds_put_format(s, "%spush_vlan:%s%#"PRIx16,
+                   colors.param, colors.end, ETH_TYPE_VLAN_8021Q);
+ }
++
++
++/* Network Service Header. */
++static enum ofperr
++decode_NXAST_RAW_PUSH_NSH(struct ofpbuf * out)
++{
++    ofpact_put_PUSH_NSH(out);
++    return 0;
++}
++
++static void
++encode_PUSH_NSH(const struct ofpact_null *null OVS_UNUSED,
++                  enum ofp_version ofp_version OVS_UNUSED, struct ofpbuf *out)
++{
++    put_NXAST_PUSH_NSH(out);
++}
++
++static char * OVS_WARN_UNUSED_RESULT
++parse_PUSH_NSH(char *arg OVS_UNUSED, struct ofpbuf *ofpacts,
++                 enum ofputil_protocol *usable_protocols OVS_UNUSED)
++{
++    ofpact_put_PUSH_NSH(ofpacts)->ofpact.raw = NXAST_RAW_PUSH_NSH;
++    return NULL;
++}
++
++static void
++format_PUSH_NSH(const struct ofpact_null *a OVS_UNUSED, struct ds *s)
++{
++    ds_put_format(s, "push_nsh");
++}
++
++/* Pop NSH header actions. */
++static enum ofperr
++decode_NXAST_RAW_POP_NSH(struct ofpbuf * out)
++{
++    ofpact_put_POP_NSH(out)->ofpact.raw = NXAST_RAW_POP_NSH;
++    return 0;
++}
++
++static void
++encode_POP_NSH(const struct ofpact_null *null OVS_UNUSED,
++                  enum ofp_version ofp_version OVS_UNUSED, struct ofpbuf *out)
++{
++    put_NXAST_POP_NSH(out);
++}
++
++static char * OVS_WARN_UNUSED_RESULT
++parse_POP_NSH(char *arg OVS_UNUSED, struct ofpbuf *ofpacts,
++                 enum ofputil_protocol *usable_protocols OVS_UNUSED)
++{
++    ofpact_put_POP_NSH(ofpacts)->ofpact.raw = NXAST_RAW_POP_NSH;
++    return NULL;
++}
++
++static void
++format_POP_NSH(const struct ofpact_null *a OVS_UNUSED, struct ds *s)
++{
++    ds_put_format(s, "pop_nsh");
++}
++
+ 
+ /* Action structure for OFPAT10_SET_DL_SRC/DST and OFPAT11_SET_DL_SRC/DST. */
+ struct ofp_action_dl_addr {
+@@ -6108,6 +6176,8 @@ ofpact_is_set_or_move_action(const struct ofpact *a)
+     case OFPACT_WRITE_ACTIONS:
+     case OFPACT_WRITE_METADATA:
+     case OFPACT_DEBUG_RECIRC:
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
+         return false;
+     default:
+         OVS_NOT_REACHED();
+@@ -6147,6 +6217,8 @@ ofpact_is_allowed_in_actions_set(const struct ofpact *a)
+     case OFPACT_SET_VLAN_PCP:
+     case OFPACT_SET_VLAN_VID:
+     case OFPACT_STRIP_VLAN:
++    case OFPACT_POP_NSH:
++    case OFPACT_PUSH_NSH:
+         return true;
+ 
+     /* In general these actions are excluded because they are not part of
+@@ -6252,6 +6324,8 @@ ofpacts_execute_action_set(struct ofpbuf *action_list,
+     /* The OpenFlow spec "Action Set" section specifies this order. */
+     ofpacts_copy_last(action_list, action_set, OFPACT_STRIP_VLAN);
+     ofpacts_copy_last(action_list, action_set, OFPACT_POP_MPLS);
++    ofpacts_copy_last(action_list, action_set, OFPACT_POP_NSH);
++    ofpacts_copy_last(action_list, action_set, OFPACT_PUSH_NSH);
+     ofpacts_copy_last(action_list, action_set, OFPACT_PUSH_MPLS);
+     ofpacts_copy_last(action_list, action_set, OFPACT_PUSH_VLAN);
+     ofpacts_copy_last(action_list, action_set, OFPACT_DEC_TTL);
+@@ -6390,6 +6464,8 @@ ovs_instruction_type_from_ofpact_type(enum ofpact_type type)
+     case OFPACT_DEBUG_RECIRC:
+     case OFPACT_CT:
+     case OFPACT_NAT:
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
+     default:
+         return OVSINST_OFPIT11_APPLY_ACTIONS;
+     }
+@@ -7017,6 +7093,10 @@ ofpact_check__(enum ofputil_protocol *usable_protocols, struct ofpact *a,
+          * OpenFlow. */
+         return OFPERR_OFPBAC_BAD_TYPE;
+ 
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
++        return 0;
++
+     case OFPACT_DEBUG_RECIRC:
+         return 0;
+ 
+@@ -7506,6 +7586,8 @@ ofpact_outputs_to_port(const struct ofpact *ofpact, ofp_port_t port)
+     case OFPACT_DEBUG_RECIRC:
+     case OFPACT_CT:
+     case OFPACT_NAT:
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
+     default:
+         return false;
+     }
+diff --git a/ofproto/ofproto-dpif-xlate.c b/ofproto/ofproto-dpif-xlate.c
+index cfd9584..2dfe8c6 100644
+--- a/ofproto/ofproto-dpif-xlate.c
++++ b/ofproto/ofproto-dpif-xlate.c
+@@ -4483,6 +4483,8 @@ freeze_unroll_actions(const struct ofpact *a, const struct ofpact *end,
+         case OFPACT_DEBUG_RECIRC:
+         case OFPACT_CT:
+         case OFPACT_NAT:
++        case OFPACT_PUSH_NSH:
++        case OFPACT_POP_NSH:
+             /* These may not generate PACKET INs. */
+             break;
+ 
+@@ -4737,6 +4739,8 @@ recirc_for_mpls(const struct ofpact *a, struct xlate_ctx *ctx)
+     case OFPACT_WRITE_ACTIONS:
+     case OFPACT_WRITE_METADATA:
+     case OFPACT_GOTO_TABLE:
++    case OFPACT_PUSH_NSH:
++    case OFPACT_POP_NSH:
+     default:
+         break;
+     }
+@@ -5108,6 +5112,10 @@ do_xlate_actions(const struct ofpact *ofpacts, size_t ofpacts_len,
+             ctx_trigger_freeze(ctx);
+             a = ofpact_next(a);
+             break;
++
++        case OFPACT_PUSH_NSH:
++        case OFPACT_POP_NSH:
++            break;
+         }
+ 
+         /* Check if need to store this and the remaining actions for later
+-- 
+1.8.4.2
+

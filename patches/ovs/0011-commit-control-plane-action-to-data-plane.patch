@@ -1,0 +1,81 @@
+From 04459e7fb5136f04ffd02acfa4856e0de57cb190 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 17:49:55 +0000
+Subject: [PATCH 11/11] commit control plane action to data plane
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/ofproto/ofproto-dpif-xlate.c b/ofproto/ofproto-dpif-xlate.c
+index 2dfe8c6..6a849c3 100644
+--- a/ofproto/ofproto-dpif-xlate.c
++++ b/ofproto/ofproto-dpif-xlate.c
+@@ -5113,8 +5113,65 @@ do_xlate_actions(const struct ofpact *ofpacts, size_t ofpacts_len,
+             a = ofpact_next(a);
+             break;
+ 
+-        case OFPACT_PUSH_NSH:
++        /* Network Service Header */
++        case OFPACT_PUSH_NSH: {
++            struct ovs_action_push_nsh push;
++            struct nsh_header *nsh = (struct nsh_header *)push.header;
++            struct nsh_md1_ctx *md1_ctx = NULL;
++            struct nsh_md2_ctx *md2_ctx = NULL;
++            int md_len = 0;
++            bool crit_opt;
++
++            /* MD Type 1 only, Todo: Type 2 support */
++            if (flow->nsh.md_type == NSH_MD_TYPE1) {
++                nsh->base.length = NSH_TYPE1_LEN >> 2;
++                nsh->base.md_type = NSH_MD_TYPE1;
++                nsh->base.next_proto = flow->nsh.next_proto;
++                nsh->base.sfp = (flow->nsh.nsp >> 8) | (flow->nsh.nsi << 24);
++
++                md1_ctx = nsh_md1_ctx(nsh);
++                md1_ctx->nshc1 = flow->nsh.nshc1;
++                md1_ctx->nshc2 = flow->nsh.nshc2;
++                md1_ctx->nshc3 = flow->nsh.nshc3;
++                md1_ctx->nshc4 = flow->nsh.nshc4;
++
++                push.len = NSH_TYPE1_LEN;
++            } else if (flow->nsh.md_type == NSH_MD_TYPE2) {
++                nsh->base.md_type = NSH_MD_TYPE2;
++                nsh->base.next_proto = flow->nsh.next_proto;
++                nsh->base.sfp = (flow->nsh.nsp >> 8) | (flow->nsh.nsi << 24);
++
++                md2_ctx = nsh_md2_ctx(nsh);
++                md_len = tun_metadata_to_geneve_header(&flow->tun_metadata,
++                                                       (struct geneve_opt *)md2_ctx,
++                                                       &crit_opt);
++                nsh->base.length = (sizeof(struct nsh_header) + md_len) >> 2;
++                push.len = md_len + sizeof(struct nsh_header);
++            }
++
++            nl_msg_put_unspec(ctx->odp_actions, OVS_ACTION_ATTR_PUSH_NSH,
++                              &push, sizeof push);
++
++            flow->base_layer = LAYER_3;
++            flow->dl_type = htons(ETH_TYPE_NSH);
++            memset(&wc->masks.nsh.md_type, 0xff, sizeof wc->masks.nsh.md_type);
++            break;
++        }
++
+         case OFPACT_POP_NSH:
++            switch (flow->nsh.next_proto) {
++            case NSH_P_ETHERNET:
++                flow->base_layer = LAYER_2;
++            case NSH_P_IPV4:
++            case NSH_P_IPV6:
++                flow->dl_type = htons(0);
++                break;
++            }
++            memset(&wc->masks.nsh.md_type, 0xff, sizeof wc->masks.nsh.md_type);
++            memset(&flow->nsh, 0x0, sizeof flow->nsh);
++            nl_msg_put_flag(ctx->odp_actions, OVS_ACTION_ATTR_POP_NSH);
++            ctx_trigger_freeze(ctx);
++            a = ofpact_next(a);
+             break;
+         }
+ 
+-- 
+1.8.4.2
+

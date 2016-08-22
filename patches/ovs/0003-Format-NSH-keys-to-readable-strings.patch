@@ -1,0 +1,89 @@
+From ec0eb0942c3c4f070de5d0097cdda2853133a515 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 14:10:43 +0000
+Subject: [PATCH 03/11] Format NSH keys to readable strings
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/lib/match.c b/lib/match.c
+index 2d4560e..d071b99 100644
+--- a/lib/match.c
++++ b/lib/match.c
+@@ -1038,6 +1038,48 @@ format_flow_tunnel(struct ds *s, const struct match *match)
+ }
+ 
+ static void
++format_flow_nsh(struct ds *s, const struct match *match)
++{
++    const struct flow_wildcards *wc = &match->wc;
++    const struct flow_nsh *nsh = &match->flow.nsh;
++
++    if (wc->masks.nsh.md_type) {
++        format_be32_masked(s, "nsp", nsh->nsp, wc->masks.nsh.nsp);
++        ds_put_format(s, "nsi=%"PRIu8",", nsh->nsi);
++
++        if (wc->masks.nsh.flags) {
++            format_be32_masked(s, "flags", nsh->flags, wc->masks.nsh.flags);
++        }
++
++        ds_put_format(s, "md_type=%"PRIu8",", nsh->md_type);
++
++        if (wc->masks.nsh.next_proto) {
++            ds_put_format(s, "next_proto=%"PRIu8",", nsh->next_proto);
++        }
++        if(nsh->md_type == NSH_MD_TYPE1) {
++            if (wc->masks.nsh.nshc1) {
++                format_be32_masked(s, "nshc1", nsh->nshc1,
++                                   wc->masks.nsh.nshc1);
++            }
++            if (wc->masks.nsh.nshc2) {
++                format_be32_masked(s, "nshc2", nsh->nshc2,
++                                   wc->masks.nsh.nshc2);
++            }
++            if (wc->masks.nsh.nshc3) {
++                format_be32_masked(s, "nshc3", nsh->nshc3,
++                                   wc->masks.nsh.nshc3);
++            }
++            if (wc->masks.nsh.nshc4) {
++                format_be32_masked(s, "nshc4", nsh->nshc4,
++                                   wc->masks.nsh.nshc4);
++            }
++        } else if (nsh->md_type == NSH_MD_TYPE2) {
++            tun_metadata_match_format(s, match);
++        }
++    }
++}
++
++static void
+ format_ct_label_masked(struct ds *s, const ovs_u128 *key, const ovs_u128 *mask)
+ {
+     if (!ovs_u128_is_zero(*mask)) {
+@@ -1194,6 +1236,8 @@ match_format(const struct match *match, struct ds *s, int priority)
+ 
+     format_be64_masked(s, "metadata", f->metadata, wc->masks.metadata);
+ 
++    format_flow_nsh(s, match);
++
+     if (wc->masks.in_port.ofp_port) {
+         ds_put_format(s, "%sin_port=%s", colors.param, colors.end);
+         ofputil_format_port(f->in_port.ofp_port, s);
+diff --git a/lib/packets.h b/lib/packets.h
+index be9f72f..e74fd3e 100644
+--- a/lib/packets.h
++++ b/lib/packets.h
+@@ -1016,6 +1016,12 @@ struct vxlanhdr {
+ 
+ #define VXLAN_FLAGS 0x08000000  /* struct vxlanhdr.vx_flags required value. */
+ 
++#define NSH_MD_TYPE_NONE  0x00
++#define NSH_MD_TYPE1      0x01
++#define NSH_MD_TYPE2      0x02
++#define NSH_MD_EXP1       0xFE
++#define NSH_MD_EXP2       0xFF
++
+ void ipv6_format_addr(const struct in6_addr *addr, struct ds *);
+ void ipv6_format_addr_bracket(const struct in6_addr *addr, struct ds *,
+                               bool bracket);
+-- 
+1.8.4.2
+

@@ -1,0 +1,169 @@
+From 64364b5bf0fced289b161e36537dcf719d1239c2 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 17:05:15 +0000
+Subject: [PATCH 08/11] Userspace: Parse NSH header in flow_extract
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/lib/flow.c b/lib/flow.c
+index dbe8ce9..bdb9daa 100644
+--- a/lib/flow.c
++++ b/lib/flow.c
+@@ -439,6 +439,41 @@ invalid:
+     arp_buf[1] = eth_addr_zero;
+ }
+ 
++static int
++parse_nsh(const void **datap, size_t *sizep, struct flow_nsh *key, struct tun_metadata *md)
++{
++    const struct nsh_header *nsh = (const struct nsh_header *) *datap;
++    uint16_t length = 0;
++
++    memset(key, 0, sizeof(struct flow_nsh));
++
++    length = nsh->base.length << 2;
++    if (length > NSH_LEN_MAX)
++        return -EINVAL;
++
++    key->flags = nsh->base.flags;
++    key->md_type = nsh->base.md_type;
++    key->next_proto = nsh->base.next_proto;
++    key->nsi = nsh->base.nsi;
++    key->nsp = nsh->base.sfp << 8;
++
++    if (nsh->base.md_type == NSH_MD_TYPE1) {
++        const struct nsh_md1_ctx *md1_ctx = nsh_md1_ctx(nsh);
++        key->nshc1 = md1_ctx->nshc1;
++        key->nshc2 = md1_ctx->nshc2;
++        key->nshc3 = md1_ctx->nshc3;
++        key->nshc4 = md1_ctx->nshc4;
++    } else if (nsh->base.md_type == NSH_MD_TYPE2) {
++        const struct nsh_md2_ctx *ctx = nsh_md2_ctx(nsh);
++        const struct tun_metadata *flow = (struct tun_metadata *) ctx;
++        tun_metadata_from_geneve_udpif(flow, flow, md);
++    }
++
++    data_pull(datap, sizep, length);
++
++    return 0;
++}
++
+ /* Initializes 'flow' members from 'packet' and 'md'.
+  * Expects packet->l3_ofs to be set to 0 for layer 3 packets.
+  *
+@@ -578,6 +613,24 @@ miniflow_extract(struct dp_packet *packet, struct miniflow *dst)
+     /* Network layer. */
+     packet->l3_ofs = (char *)data - frame;
+ 
++    /* Network Service Header */
++    if (dl_type == htons(ETH_TYPE_NSH)) {
++        struct flow_nsh nsh;
++        struct tun_metadata metadata;
++
++        if (OVS_LIKELY(!parse_nsh(&data, &size, &nsh, &metadata))) {
++            miniflow_push_words(mf, nsh, &nsh, sizeof(struct flow_nsh) /
++                                sizeof(uint64_t));
++            if (nsh.md_type == NSH_MD_TYPE2) {
++                if (metadata.present.map) {
++                    miniflow_push_words(mf, tun_metadata, &metadata,
++                                        sizeof(metadata) / sizeof(uint64_t));
++                }
++            }
++        }
++        goto out;
++    }
++
+     nw_frag = 0;
+     if (OVS_LIKELY(dl_type == htons(ETH_TYPE_IP))) {
+         const struct ip_header *nh = data;
+@@ -1327,6 +1380,18 @@ void flow_wildcards_init_for_packet(struct flow_wildcards *wc,
+     WC_MASK_FIELD(wc, dp_hash);
+     WC_MASK_FIELD(wc, in_port);
+ 
++    if (flow->nsh.md_type) {
++        WC_MASK_FIELD(wc, nsh.flags);
++        WC_MASK_FIELD(wc, nsh.md_type);
++        WC_MASK_FIELD(wc, nsh.next_proto);
++        WC_MASK_FIELD(wc, nsh.nsi);
++        WC_MASK_FIELD(wc, nsh.nsp);
++        WC_MASK_FIELD(wc, nsh.nshc1);
++        WC_MASK_FIELD(wc, nsh.nshc2);
++        WC_MASK_FIELD(wc, nsh.nshc3);
++        WC_MASK_FIELD(wc, nsh.nshc4);
++    }
++
+     /* actset_output wildcarded. */
+ 
+     if (flow->base_layer == LAYER_2) {
+diff --git a/lib/packets.h b/lib/packets.h
+index 75fa7c2..5b8f63e 100644
+--- a/lib/packets.h
++++ b/lib/packets.h
+@@ -1017,12 +1017,64 @@ struct vxlanhdr {
+ 
+ #define VXLAN_FLAGS 0x08000000  /* struct vxlanhdr.vx_flags required value. */
+ 
++/* Network service header */
++struct nsh_base_hdr {
++	uint8_t flags;
++	uint8_t length;
++	uint8_t md_type;
++	uint8_t next_proto;
++	union {
++		struct {
++			uint8_t nsp[3];
++			uint8_t nsi;
++		};
++		ovs_be32 sfp;
++	};
++};
++
++struct nsh_md1_ctx {
++	ovs_be32 nshc1;
++	ovs_be32 nshc2;
++	ovs_be32 nshc3;
++	ovs_be32 nshc4;
++};
++
++struct nsh_md2_ctx {
++	ovs_be16 md_class;
++	uint8_t	type;
++	uint8_t	length;
++	uint8_t	md_value[];
++};
++
++/* MD Type 1 only, Todo: Type 2 support */
++struct nsh_header {
++	struct nsh_base_hdr base;
++	uint8_t ctx[];
++};
++
++static inline struct nsh_md1_ctx *nsh_md1_ctx(const struct nsh_header *nsh)
++{
++	return (struct nsh_md1_ctx *) (nsh + 1);
++}
++
++static inline struct nsh_md2_ctx *nsh_md2_ctx(const struct nsh_header *nsh)
++{
++	return (struct nsh_md2_ctx *) (nsh + 1);
++}
++
++#define NSH_P_IPV4        0x01
++#define NSH_P_IPV6        0x02
++#define NSH_P_ETHERNET    0x03
++
+ #define NSH_MD_TYPE_NONE  0x00
+ #define NSH_MD_TYPE1      0x01
+ #define NSH_MD_TYPE2      0x02
+ #define NSH_MD_EXP1       0xFE
+ #define NSH_MD_EXP2       0xFF
+ 
++#define NSH_TYPE1_LEN     24
++#define NSH_LEN_MAX       256
++
+ void ipv6_format_addr(const struct in6_addr *addr, struct ds *);
+ void ipv6_format_addr_bracket(const struct in6_addr *addr, struct ds *,
+                               bool bracket);
+-- 
+1.8.4.2
+

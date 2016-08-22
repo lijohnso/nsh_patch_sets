@@ -1,0 +1,67 @@
+From 4e3fdc3638c3c0204780a2af35b6913f65e6b9f4 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 13:50:18 +0000
+Subject: [PATCH 02/11] Add NSH keys as match fields for user space flow table
+
+Add NSH keys (Metadata type I only, MD type II will reuse the
+the fields definition tun_metadataN) as part of match fields
+for the user space flow table.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/include/openvswitch/flow.h b/include/openvswitch/flow.h
+index fa59218..f6110a5 100644
+--- a/include/openvswitch/flow.h
++++ b/include/openvswitch/flow.h
+@@ -128,6 +128,9 @@ struct flow {
+     ovs_be16 tcp_flags;         /* TCP flags. With L3 to avoid matching L4. */
+     ovs_be16 pad3;              /* Pad to 64 bits. */
+ 
++    /* Network Service Header */
++    struct flow_nsh nsh;
++
+     /* L4 (64-bit aligned) */
+     ovs_be16 tp_src;            /* TCP/UDP/SCTP source port/ICMP type. */
+     ovs_be16 tp_dst;            /* TCP/UDP/SCTP destination port/ICMP code. */
+@@ -146,7 +149,7 @@ BUILD_ASSERT_DECL(sizeof(struct flow_tnl) % sizeof(uint64_t) == 0);
+ /* Remember to update FLOW_WC_SEQ when changing 'struct flow'. */
+ BUILD_ASSERT_DECL(OFFSETOFEND(struct flow, pad4)
+                   == sizeof(struct flow_tnl) + sizeof(struct tun_metadata)
+-                     + 232 && FLOW_WC_SEQ == 37);
++                     + sizeof(struct flow_nsh) + 232 && FLOW_WC_SEQ == 37);
+ 
+ /* Incremental points at which flow classification may be performed in
+  * segments.
+diff --git a/include/openvswitch/packets.h b/include/openvswitch/packets.h
+index 8377af9..8526656 100644
+--- a/include/openvswitch/packets.h
++++ b/include/openvswitch/packets.h
+@@ -60,4 +60,25 @@ union flow_in_port {
+     ofp_port_t ofp_port;
+ };
+ 
++/* Network Service Header For flow and Metadata
++ * For metadata type I, the contexts are stored in nshc1 to nshc4,
++ * For metadata type II, the contexts are stored in tun_metadta. */
++struct flow_nsh {
++    uint8_t flags;
++    uint8_t md_type;
++    uint8_t next_proto;
++    uint8_t nsi;
++    ovs_be32 nsp;
++    ovs_be32 nshc1;
++    ovs_be32 nshc2;
++    ovs_be32 nshc3;
++    ovs_be32 nshc4;
++};
++
++/* NSH flags */
++#define FLOW_NSH_F_OAM (1 << 0)
++#define FLOW_NSH_F_CTX (1 << 1)
++
++#define FLOW_NSH_F_MASK ((1 << 2) - 1)
++
+ #endif /* packets.h */
+-- 
+1.8.4.2
+

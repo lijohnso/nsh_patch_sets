@@ -1,0 +1,442 @@
+From 09474a80bfbc64f0ce36b69a3a5228fc92e9ad11 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 15:57:44 +0000
+Subject: [PATCH 07/11] Add Meta flow key for NSH header
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/build-aux/extract-ofp-fields b/build-aux/extract-ofp-fields
+index 7f58788..d8463d4 100755
+--- a/build-aux/extract-ofp-fields
++++ b/build-aux/extract-ofp-fields
+@@ -49,7 +49,8 @@ PREREQS = {"none": "MFP_NONE",
+            "ICMPv6": "MFP_ICMPV6",
+            "ND": "MFP_ND",
+            "ND solicit": "MFP_ND_SOLICIT",
+-           "ND advert": "MFP_ND_ADVERT"}
++           "ND advert": "MFP_ND_ADVERT",
++           "NSH": "MFP_NSH"}
+ 
+ # Maps a name prefix into an (experimenter ID, class) pair, so:
+ #
+diff --git a/include/openvswitch/meta-flow.h b/include/openvswitch/meta-flow.h
+index 2d78b57..08a39cf 100644
+--- a/include/openvswitch/meta-flow.h
++++ b/include/openvswitch/meta-flow.h
+@@ -1720,6 +1720,136 @@ enum OVS_PACKED_ENUM mf_field_id {
+      */
+     MFF_ND_TLL,
+ 
++/* ## ---- ## */
++/* ## NSH ## */
++/* ## ---- ## */
++
++    /* "nsh_mdtype".
++     *
++     * For a packet received, it includes a (8-bit)
++     * nsh md-type field (md-type).
++     *
++     * Type: u8.
++     * Maskable: bitwise.
++     * Formatting: decimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_MDTYPE(115) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_MDTYPE,
++
++    /* "nsh_np".
++     *
++     * For a packet received, it includes a (8-bit)
++     * nsh next protocol field (np).
++     *
++     * Type: u8.
++     * Maskable: bitwise.
++     * Formatting: decimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_NP(116) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_NP,
++
++    /* "nsi".
++     *
++     * For a packet received, it includes a (8-bit)
++     * network service header service index (nsi).
++     *
++     * Type: u8.
++     * Maskable: bitwise.
++     * Formatting: decimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSI(117) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSI,
++
++    /* "nsp".
++     *
++     * For a packet received including a (32-bit)
++     * network service header service path (nsp), the nsp is stored
++     * in the low 24-bits and the high bits are zeroed.  For
++     * other packets, the value is 0.
++     *
++     * Type: be32.
++     * Maskable: bitwise.
++     * Formatting: hexadecimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSP(118) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSP,
++
++    /* "nshc1".
++     *
++     * For a packet received including a (32-bit)
++     * Network Platform Context (nshc1), the nshc1 is stored
++     * in the 32-bits.  For other packets, the value is 0.
++     *
++     * Type: be32.
++     * Maskable: bitwise.
++     * Formatting: hexadecimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_C1(119) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_C1,
++
++    /* "nshc2".
++     *
++     * For a packet received including a (32-bit)
++     * Network Shared Context (nshc2), the nshc2 is stored
++     * in the 32-bits.  For other packets, the value is 0.
++     *
++     * Type: be32.
++     * Maskable: bitwise.
++     * Formatting: hexadecimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_C2(120) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_C2,
++
++    /* "nshc3".
++     *
++     * For a packet received via including a (32-bit)
++     * Service Platform Context (nshc3), the nshc3 is stored
++     * in the 32-bits.  For other packets, the value is 0.
++     *
++     * Type: be32.
++     * Maskable: bitwise.
++     * Formatting: hexadecimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_C3(121) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_C3,
++
++    /* "nshc4".
++     *
++     * For a packet received including a (32-bit)
++     * Service Shared Context (nshc4), the nshc4 is stored
++     * in the 32-bits.  For other packets, the value is 0.
++     *
++     * Type: be32.
++     * Maskable: bitwise.
++     * Formatting: hexadecimal.
++     * Prerequisites: NSH.
++     * Access: read/write.
++     * NXM: NXM_NX_NSH_C4(122) since OF1.3 and v2.5.
++     * OXM: none.
++     */
++    MFF_NSH_C4,
++
+     MFF_N_IDS
+ };
+ 
+@@ -1799,6 +1929,7 @@ enum OVS_PACKED_ENUM mf_prereqs {
+     MFP_IPV4,
+     MFP_IPV6,
+     MFP_IP_ANY,
++    MFP_NSH,
+ 
+     /* L2.5 requirements. */
+     MFP_MPLS,
+diff --git a/lib/meta-flow.c b/lib/meta-flow.c
+index 26a04e0..f7fc445 100644
+--- a/lib/meta-flow.c
++++ b/lib/meta-flow.c
+@@ -325,6 +325,23 @@ mf_is_all_wild(const struct mf_field *mf, const struct flow_wildcards *wc)
+     case MFF_TCP_FLAGS:
+         return !wc->masks.tcp_flags;
+ 
++    case MFF_NSH_MDTYPE:
++        return !wc->masks.nsh.md_type;
++    case MFF_NSH_NP:
++        return !wc->masks.nsh.next_proto;
++    case MFF_NSI:
++        return !wc->masks.nsh.nsi;
++    case MFF_NSP:
++        return !wc->masks.nsh.nsp;
++    case MFF_NSH_C1:
++        return !wc->masks.nsh.nshc1;
++    case MFF_NSH_C2:
++        return !wc->masks.nsh.nshc2;
++    case MFF_NSH_C3:
++        return !wc->masks.nsh.nshc3;
++    case MFF_NSH_C4:
++        return !wc->masks.nsh.nshc4;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -384,6 +401,8 @@ mf_are_prereqs_ok(const struct mf_field *mf, const struct flow *flow)
+         return eth_type_mpls(flow->dl_type);
+     case MFP_IP_ANY:
+         return is_ip_any(flow);
++    case MFP_NSH:
++        return flow->dl_type == htons(ETH_TYPE_NSH);
+ 
+     case MFP_TCP:
+         return is_ip_any(flow) && flow->nw_proto == IPPROTO_TCP
+@@ -446,6 +465,7 @@ mf_mask_field_and_prereqs__(const struct mf_field *mf,
+     case MFP_IPV6:
+     case MFP_MPLS:
+     case MFP_IP_ANY:
++    case MFP_NSH:
+         /* dl_type always unwildcarded. */
+         break;
+     case MFP_VLAN_VID:
+@@ -485,6 +505,7 @@ mf_bitmap_set_field_and_prereqs(const struct mf_field *mf, struct mf_bitmap *bm)
+     case MFP_IPV6:
+     case MFP_MPLS:
+     case MFP_IP_ANY:
++    case MFP_NSH:
+         bitmap_set1(bm->bm, MFF_ETH_TYPE);
+         break;
+     case MFP_VLAN_VID:
+@@ -613,6 +634,16 @@ mf_is_value_valid(const struct mf_field *mf, const union mf_value *value)
+     case MFF_CT_STATE:
+         return !(value->be32 & ~htonl(CS_SUPPORTED_MASK));
+ 
++    case MFF_NSH_MDTYPE:
++    case MFF_NSH_NP:
++    case MFF_NSI:
++    case MFF_NSP:
++    case MFF_NSH_C1:
++    case MFF_NSH_C2:
++    case MFF_NSH_C3:
++    case MFF_NSH_C4:
++        return true;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -855,6 +886,31 @@ mf_get_value(const struct mf_field *mf, const struct flow *flow,
+         value->ipv6 = flow->nd_target;
+         break;
+ 
++    case MFF_NSH_MDTYPE:
++        value->u8 = flow->nsh.md_type;
++        break;
++    case MFF_NSH_NP:
++        value->u8 = flow->nsh.next_proto;
++        break;
++    case MFF_NSI:
++        value->u8 = flow->nsh.nsi;
++        break;
++    case MFF_NSP:
++        value->be32 = flow->nsh.nsp;
++        break;
++    case MFF_NSH_C1:
++        value->be32 = flow->nsh.nshc1;
++        break;
++    case MFF_NSH_C2:
++        value->be32 = flow->nsh.nshc2;
++        break;
++    case MFF_NSH_C3:
++        value->be32 = flow->nsh.nshc3;
++        break;
++    case MFF_NSH_C4:
++        value->be32 = flow->nsh.nshc4;
++        break;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -1113,6 +1169,31 @@ mf_set_value(const struct mf_field *mf,
+         match_set_nd_target(match, &value->ipv6);
+         break;
+ 
++    case MFF_NSH_MDTYPE:
++        MATCH_SET_FIELD_UINT8(match, nsh.md_type, value->u8);
++        break;
++    case MFF_NSH_NP:
++        MATCH_SET_FIELD_UINT8(match, nsh.next_proto, value->u8);
++        break;
++    case MFF_NSI:
++        MATCH_SET_FIELD_UINT8(match, nsh.nsi, value->u8);
++        break;
++    case MFF_NSP:
++        MATCH_SET_FIELD_BE32(match, nsh.nsp, value->be32);
++        break;
++    case MFF_NSH_C1:
++        MATCH_SET_FIELD_BE32(match, nsh.nshc1, value->be32);
++        break;
++    case MFF_NSH_C2:
++        MATCH_SET_FIELD_BE32(match, nsh.nshc2, value->be32);
++        break;
++    case MFF_NSH_C3:
++        MATCH_SET_FIELD_BE32(match, nsh.nshc3, value->be32);
++        break;
++    case MFF_NSH_C4:
++        MATCH_SET_FIELD_BE32(match, nsh.nshc4, value->be32);
++        break;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -1426,6 +1507,31 @@ mf_set_flow_value(const struct mf_field *mf,
+         flow->nd_target = value->ipv6;
+         break;
+ 
++    case MFF_NSH_MDTYPE:
++        flow->nsh.md_type = value->u8;
++        break;
++    case MFF_NSH_NP:
++        flow->nsh.next_proto = value->u8;
++        break;
++    case MFF_NSI:
++        flow->nsh.nsi = value->u8;
++        break;
++    case MFF_NSP:
++        flow->nsh.nsp = value->be32;
++        break;
++    case MFF_NSH_C1:
++        flow->nsh.nshc1 = value->be32;
++        break;
++    case MFF_NSH_C2:
++        flow->nsh.nshc2 = value->be32;
++        break;
++    case MFF_NSH_C3:
++        flow->nsh.nshc3 = value->be32;
++        break;
++    case MFF_NSH_C4:
++        flow->nsh.nshc4 = value->be32;
++        break;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -1750,6 +1856,31 @@ mf_set_wild(const struct mf_field *mf, struct match *match, char **err_str)
+         memset(&match->flow.nd_target, 0, sizeof match->flow.nd_target);
+         break;
+ 
++    case MFF_NSH_MDTYPE:
++        MATCH_SET_FIELD_MASKED(match, nsh.md_type, 0, 0);
++        break;
++    case MFF_NSH_NP:
++        MATCH_SET_FIELD_MASKED(match, nsh.next_proto, 0, 0);
++        break;
++    case MFF_NSI:
++        MATCH_SET_FIELD_MASKED(match, nsh.nsi, 0, 0);
++        break;
++    case MFF_NSP:
++        MATCH_SET_FIELD_MASKED(match, nsh.nsp, htonl(0), htonl(0));
++        break;
++    case MFF_NSH_C1:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc1, htonl(0), htonl(0));
++        break;
++    case MFF_NSH_C2:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc2, htonl(0), htonl(0));
++        break;
++    case MFF_NSH_C3:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc3, htonl(0), htonl(0));
++        break;
++    case MFF_NSH_C4:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc4, htonl(0), htonl(0));
++        break;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+@@ -1973,6 +2104,31 @@ mf_set(const struct mf_field *mf,
+         match_set_tcp_flags_masked(match, value->be16, mask->be16);
+         break;
+ 
++    case MFF_NSH_MDTYPE:
++        MATCH_SET_FIELD_MASKED(match, nsh.md_type, value->u8, mask->u8);
++        break;
++    case MFF_NSH_NP:
++        MATCH_SET_FIELD_MASKED(match, nsh.next_proto, value->u8, mask->u8);
++        break;
++    case MFF_NSI:
++        MATCH_SET_FIELD_MASKED(match, nsh.nsi, value->u8, mask->u8);
++        break;
++    case MFF_NSP:
++        MATCH_SET_FIELD_MASKED(match, nsh.nsp, value->be32, mask->be32);
++        break;
++    case MFF_NSH_C1:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc1, value->be32, mask->be32);
++        break;
++    case MFF_NSH_C2:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc2, value->be32, mask->be32);
++        break;
++    case MFF_NSH_C3:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc3, value->be32, mask->be32);
++        break;
++    case MFF_NSH_C4:
++        MATCH_SET_FIELD_MASKED(match, nsh.nshc4, value->be32, mask->be32);
++        break;
++
+     case MFF_N_IDS:
+     default:
+         OVS_NOT_REACHED();
+diff --git a/lib/nx-match.c b/lib/nx-match.c
+index faaf0b3..f4e4c6d 100644
+--- a/lib/nx-match.c
++++ b/lib/nx-match.c
+@@ -1038,6 +1038,22 @@ nx_put_raw(struct ofpbuf *b, enum ofp_version oxm, const struct match *match,
+                flow->tunnel.gbp_flags, match->wc.masks.tunnel.gbp_flags);
+     tun_metadata_to_nx_match(b, oxm, match);
+ 
++    /* Network Service Header */
++    nxm_put_8m(b, MFF_NSH_MDTYPE, oxm, flow->nsh.md_type,
++            match->wc.masks.nsh.md_type);
++    nxm_put_8m(b, MFF_NSH_NP, oxm, flow->nsh.next_proto,
++            match->wc.masks.nsh.next_proto);
++    nxm_put_8m(b, MFF_NSI, oxm, flow->nsh.nsi, match->wc.masks.nsh.nsi);
++    nxm_put_32m(b, MFF_NSP, oxm, flow->nsh.nsp, match->wc.masks.nsh.nsp);
++    nxm_put_32m(b, MFF_NSH_C1, oxm, flow->nsh.nshc1,
++            match->wc.masks.nsh.nshc1);
++    nxm_put_32m(b, MFF_NSH_C2, oxm, flow->nsh.nshc2,
++            match->wc.masks.nsh.nshc2);
++    nxm_put_32m(b, MFF_NSH_C3, oxm, flow->nsh.nshc3,
++            match->wc.masks.nsh.nshc3);
++    nxm_put_32m(b, MFF_NSH_C4, oxm, flow->nsh.nshc4,
++            match->wc.masks.nsh.nshc4);
++
+     /* Registers. */
+     if (oxm < OFP15_VERSION) {
+         for (i = 0; i < FLOW_N_REGS; i++) {
+diff --git a/lib/packets.h b/lib/packets.h
+index e74fd3e..75fa7c2 100644
+--- a/lib/packets.h
++++ b/lib/packets.h
+@@ -328,6 +328,7 @@ ovs_be32 set_mpls_lse_values(uint8_t ttl, uint8_t tc, uint8_t bos,
+ #define ETH_TYPE_RARP          0x8035
+ #define ETH_TYPE_MPLS          0x8847
+ #define ETH_TYPE_MPLS_MCAST    0x8848
++#define ETH_TYPE_NSH           0x894f
+ 
+ static inline bool eth_type_mpls(ovs_be16 eth_type)
+ {
+-- 
+1.8.4.2
+

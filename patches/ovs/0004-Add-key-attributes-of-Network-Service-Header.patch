@@ -1,0 +1,78 @@
+From 8567b0937e52460208f415c6efa8106e6af32655 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Mon, 22 Aug 2016 14:22:27 +0000
+Subject: [PATCH 04/11] Add key attributes of Network Service Header
+
+The openvswitch exchange the key with key netlink message
+between the kernel data path and user space flow tables.
+The key fields are defined as key attributes.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/datapath/linux/compat/include/linux/openvswitch.h b/datapath/linux/compat/include/linux/openvswitch.h
+index 912bf68..fc32886 100644
+--- a/datapath/linux/compat/include/linux/openvswitch.h
++++ b/datapath/linux/compat/include/linux/openvswitch.h
+@@ -342,6 +342,7 @@ enum ovs_key_attr {
+ 	OVS_KEY_ATTR_ND,        /* struct ovs_key_nd */
+ 	OVS_KEY_ATTR_SKB_MARK,  /* u32 skb mark */
+ 	OVS_KEY_ATTR_TUNNEL,    /* Nested set of ovs_tunnel attributes */
++	OVS_KEY_ATTR_NSH,       /* Nested set of ovs_nsh attributes */
+ 	OVS_KEY_ATTR_SCTP,      /* struct ovs_key_sctp */
+ 	OVS_KEY_ATTR_TCP_FLAGS,	/* be16 TCP flags. */
+ 	OVS_KEY_ATTR_DP_HASH,   /* u32 hash value. Value 0 indicates the hash
+diff --git a/lib/odp-execute.c b/lib/odp-execute.c
+index a7c4ebb..33fb2c9 100644
+--- a/lib/odp-execute.c
++++ b/lib/odp-execute.c
+@@ -338,6 +338,7 @@ odp_execute_set_action(struct dp_packet *packet, const struct nlattr *a)
+     case OVS_KEY_ATTR_CT_MARK:
+     case OVS_KEY_ATTR_CT_LABELS:
+     case OVS_KEY_ATTR_NEXT_BASE_LAYER:
++    case OVS_KEY_ATTR_NSH:
+     case __OVS_KEY_ATTR_MAX:
+     default:
+         OVS_NOT_REACHED();
+@@ -438,6 +439,7 @@ odp_execute_masked_set_action(struct dp_packet *packet,
+     case OVS_KEY_ATTR_ICMPV6:
+     case OVS_KEY_ATTR_TCP_FLAGS:
+     case OVS_KEY_ATTR_NEXT_BASE_LAYER:
++    case OVS_KEY_ATTR_NSH:
+     case __OVS_KEY_ATTR_MAX:
+     default:
+         OVS_NOT_REACHED();
+diff --git a/lib/odp-util.c b/lib/odp-util.c
+index 38096b5..8749890 100644
+--- a/lib/odp-util.c
++++ b/lib/odp-util.c
+@@ -167,6 +167,7 @@ ovs_key_attr_to_string(enum ovs_key_attr attr, char *namebuf, size_t bufsize)
+     case OVS_KEY_ATTR_DP_HASH: return "dp_hash";
+     case OVS_KEY_ATTR_RECIRC_ID: return "recirc_id";
+     case OVS_KEY_ATTR_NEXT_BASE_LAYER: return "next_base_layer";
++    case OVS_KEY_ATTR_NSH: return "nsh";
+ 
+     case __OVS_KEY_ATTR_MAX:
+     default:
+@@ -2998,6 +2999,7 @@ format_odp_key_attr(const struct nlattr *a, const struct nlattr *ma,
+     }
+ 
+     case OVS_KEY_ATTR_UNSPEC:
++    case OVS_KEY_ATTR_NSH:
+     case __OVS_KEY_ATTR_MAX:
+     default:
+         format_generic_odp_key(a, ds);
+diff --git a/ofproto/ofproto-dpif-sflow.c b/ofproto/ofproto-dpif-sflow.c
+index 44a0f73..605ad5b 100644
+--- a/ofproto/ofproto-dpif-sflow.c
++++ b/ofproto/ofproto-dpif-sflow.c
+@@ -1038,6 +1038,7 @@ sflow_read_set_action(const struct nlattr *attr,
+     case OVS_KEY_ATTR_CT_LABELS:
+     case OVS_KEY_ATTR_UNSPEC:
+     case OVS_KEY_ATTR_NEXT_BASE_LAYER:
++    case OVS_KEY_ATTR_NSH:
+     case __OVS_KEY_ATTR_MAX:
+     default:
+         break;
+-- 
+1.8.4.2
+
