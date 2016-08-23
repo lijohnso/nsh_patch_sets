@@ -1,7 +1,10 @@
 IETF draft at:
+
     https://tools.ietf.org/html/draft-ietf-sfc-nsh-01
+
 defines a new protocol named Network Service Header (NSH) for
 Service Function Chaining. The NSH format looks like below:
+
 
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |Ver|O|C|R|R|R|R|R|R|    Length   |   MD Type   |  Next Proto   |
@@ -12,6 +15,7 @@ Service Function Chaining. The NSH format looks like below:
   ~               Mandatory/Optional Context Header               ~
   |                                                               |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
 
 In this patch set, we implement the NSH support for the OVS which
 then can be used as Service Function Forwarder. NSH is transport
@@ -26,6 +30,7 @@ tunneling port is set to ARPHRD_NONE, which breaks the assumption
 that all frames communicated between OVS data plane and tunneling
 ports should start from a Ethernet header. Hence Simon Horman
 submitted a patch set to enable the raw protocol support at:
+
     http://openvswitch.org/pipermail/dev/2016-June/072010.html
 
 In order to support NSH without depending on Simon's patch, we
@@ -60,6 +65,7 @@ Step 1: Create VxLAN port
   $ovs-vsctl add-port br-int vxlan0 -- set interface vxlan0 \
    type=vxlan options:remote_ip=192.168.50.102 options:key=flow \
    options:dst_port=4789
+
 Step 2: Add flows for Egress
    $ovs-ofctl add-flow br-int "table=0, priority=260, in_port=LOCAL \
     actions=load:0x1->NXM_NX_NSP[],load:0xFF->NXM_NX_NSI[],\
@@ -68,6 +74,7 @@ Step 2: Add flows for Egress
     load:0x99aabbcc->NXM_NX_NSH_C3[],load:0xddeeff00->NXM_NX_NSH_C4[],\
     push_nsh,push_eth(dst=00:11:22:33:44:55,src=66:77:88:99:aa:bb),\
     output:1"
+
 Step 3: Add flow for Ingress
    $ovs-ofctl add-flow br-int "table=0, priority=260, in_port=1,\
     nsh_mdtype=1, nsp=0x800001, nsi=0xFF, nshc1=0xddeeff00,\
