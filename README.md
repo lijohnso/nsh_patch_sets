@@ -5,18 +5,16 @@ IETF draft at:
 defines a new protocol named Network Service Header (NSH) for
 Service Function Chaining. The NSH format looks like below:
 
-
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |Ver|O|C|R|R|R|R|R|R|    Length   |   MD Type   |  Next Proto   |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                Service Path ID                | Service Index |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                                                               |
-  ~               Mandatory/Optional Context Header               ~
-  |                                                               |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |Ver|O|C|R|R|R|R|R|R|    Length   |   MD Type   |  Next Proto   |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                Service Path ID                | Service Index |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                               |
+    ~               Mandatory/Optional Context Header               ~
+    |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  
 In this patch set, we implement the NSH support for the OVS which
 then can be used as Service Function Forwarder. NSH is transport
 independent by design, and VxLAN-GPE and Ethernet are targeted
