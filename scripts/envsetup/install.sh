@@ -30,6 +30,7 @@ yum install -y net-tools tcpdump pciutils \
 pip install six
 
 BASE_DIR=`pwd`
+PATCH_DIR=${BASE_DIR}/../../patches
 if [ "${WORK_DIR}" == "" ] ;then
 	WORK_DIR=/opt/
 fi
@@ -55,12 +56,12 @@ expect -c "
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/linux
-	patches=`cat linux_patches.list`
+	patches=`cat ${BASE_DIR}/linux_patches.list`
 	for patch_file in ${patches}
 	do
-		patch -p1 < ${patch_file}
+		patch -p1 < ${PATCH_DIR}/${patch_file}
 	done
-	cp -f ../config .config
+	cp -f ${BASE_DIR}/config .config
 	make -j4 && make modules
 	make modules_install && make install
 
@@ -83,10 +84,10 @@ expect -c "
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/openvswitch
-	patches=`cat ovs_patches.list`
+	patches=`cat ${BASE_DIR}/ovs_patches.list`
 	for patch_file in ${patches}
 	do
-		patch -p1 < ${patch_file}
+		patch -p1 < ${PATCH_DIR}/${patch_file}
 	done
 	./boot.sh
 	./configure
