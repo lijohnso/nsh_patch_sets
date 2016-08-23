@@ -1,0 +1,62 @@
+From cbe1021ae53b8be5198183bc10c4066b9b8f4283 Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Tue, 23 Aug 2016 08:54:52 +0000
+Subject: [PATCH 1/4] Add NSH fields for Openvswitch flow key
+
+Openvswitch could use the fields of Network Serivce Header(NSH)
+as key to steer traffic to the Virtual Network Functions(VNF).
+The key will contain fields for NSH base header, service path
+header and context header for MD type 1. For MD type 2, will
+reuse the field definition tun_opts.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/net/openvswitch/flow.c b/net/openvswitch/flow.c
+index 42587d5..3a593e8 100644
+--- a/net/openvswitch/flow.c
++++ b/net/openvswitch/flow.c
+@@ -499,6 +499,9 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
+ 	skb_reset_mac_len(skb);
+ 	__skb_push(skb, skb->data - skb_mac_header(skb));
+ 
++	/* Network Service Header */
++	memset(&(key->nsh), 0, sizeof(key->nsh));
++
+ 	/* Network layer. */
+ 	if (key->eth.type == htons(ETH_P_IP)) {
+ 		struct iphdr *nh;
+diff --git a/net/openvswitch/flow.h b/net/openvswitch/flow.h
+index 5395ec0..73c97ef 100644
+--- a/net/openvswitch/flow.h
++++ b/net/openvswitch/flow.h
+@@ -54,10 +54,27 @@ struct ovs_tunnel_info {
+ 	(offsetof(struct sw_flow_key, recirc_id) +	\
+ 	FIELD_SIZEOF(struct sw_flow_key, recirc_id))
+ 
++/* Network Service Header
++ * Only fields of metadata type I are defined, For metadata type II,
++ * tun_opts will be reused.
++ */
++struct ovs_nsh_key {
++	u8  flags;
++	u8  md_type;    /* NSH metadata type */
++	u8  next_proto; /* NSH next protocol */
++	u8  nsi;        /* NSH index */
++	u32 nsp;        /* NSH path id */
++	u32 nshc1;      /* NSH context C1-C4 */
++	u32 nshc2;
++	u32 nshc3;
++	u32 nshc4;
++}__packed __aligned(4); /* Minimize padding. */
++
+ struct sw_flow_key {
+ 	u8 tun_opts[IP_TUNNEL_OPTS_MAX];
+ 	u8 tun_opts_len;
+ 	struct ip_tunnel_key tun_key;	/* Encapsulating tunnel key. */
++	struct ovs_nsh_key nsh;         /* network service header */
+ 	struct {
+ 		u32	priority;	/* Packet QoS priority. */
+ 		u32	skb_mark;	/* SKB mark. */
+-- 
+1.8.4.2
+

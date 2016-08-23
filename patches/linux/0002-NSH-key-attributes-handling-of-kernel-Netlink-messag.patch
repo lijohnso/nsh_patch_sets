@@ -1,0 +1,323 @@
+From ded4fb564d6c458eb3e380f2ae59ec3c5364053f Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Tue, 23 Aug 2016 09:18:18 +0000
+Subject: [PATCH 2/4] NSH key attributes handling of kernel Netlink message
+
+The openvswitch exchange the key with key netlink message
+between the kernel data path and user space flow tables.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/include/uapi/linux/openvswitch.h b/include/uapi/linux/openvswitch.h
+index 6f505e4..7a96093 100644
+--- a/include/uapi/linux/openvswitch.h
++++ b/include/uapi/linux/openvswitch.h
+@@ -319,6 +319,7 @@ enum ovs_key_attr {
+ 	OVS_KEY_ATTR_ND,        /* struct ovs_key_nd */
+ 	OVS_KEY_ATTR_SKB_MARK,  /* u32 skb mark */
+ 	OVS_KEY_ATTR_TUNNEL,    /* Nested set of ovs_tunnel attributes */
++	OVS_KEY_ATTR_NSH,       /* Nested set of ovs_nsh attributes */
+ 	OVS_KEY_ATTR_SCTP,      /* struct ovs_key_sctp */
+ 	OVS_KEY_ATTR_TCP_FLAGS,	/* be16 TCP flags. */
+ 	OVS_KEY_ATTR_DP_HASH,      /* u32 hash value. Value 0 indicates the hash
+@@ -361,6 +362,22 @@ enum ovs_tunnel_key_attr {
+ 
+ #define OVS_TUNNEL_KEY_ATTR_MAX (__OVS_TUNNEL_KEY_ATTR_MAX - 1)
+ 
++enum ovs_nsh_key_attr {
++	OVS_NSH_KEY_ATTR_FLAGS,			/* u8 NSH header flags */
++	OVS_NSH_KEY_ATTR_MD_TYPE,		/* u8 Metadata Type */
++	OVS_NSH_KEY_ATTR_NEXT_PROTO,		/* u8 Next Protocol */
++	OVS_NSH_KEY_ATTR_NSI,			/* u8 Service Index */
++	OVS_NSH_KEY_ATTR_NSP,			/* be32 Service Path ID */
++	OVS_NSH_KEY_ATTR_NSHC1,			/* be32 NSH Context Header 1 */
++	OVS_NSH_KEY_ATTR_NSHC2,			/* be32 NSH Context Header 2 */
++	OVS_NSH_KEY_ATTR_NSHC3,			/* be32 NSH Context Header 3 */
++	OVS_NSH_KEY_ATTR_NSHC4,			/* be32 NSH Context Header 4 */
++	OVS_NSH_KEY_ATTR_METADATA,		/* Array of Metadata Options */
++	__OVS_NSH_KEY_ATTR_MAX
++};
++
++#define OVS_NSH_KEY_ATTR_MAX (__OVS_NSH_KEY_ATTR_MAX - 1)
++
+ /**
+  * enum ovs_frag_type - IPv4 and IPv6 fragment type
+  * @OVS_FRAG_TYPE_NONE: Packet is not a fragment.
+diff --git a/net/openvswitch/flow_netlink.c b/net/openvswitch/flow_netlink.c
+index fc94fbe..ee0539c 100644
+--- a/net/openvswitch/flow_netlink.c
++++ b/net/openvswitch/flow_netlink.c
+@@ -277,12 +277,26 @@ size_t ovs_tun_key_attr_size(void)
+ 		+ nla_total_size(2);   /* OVS_TUNNEL_KEY_ATTR_TP_DST */
+ }
+ 
++size_t ovs_nsh_key_attr_size(void)
++{
++	return    nla_total_size(1)    /* OVS_NSH_KEY_ATTR_FLAGS */
++		+ nla_total_size(1)    /* OVS_NSH_KEY_ATTR_MD_TYPE */
++		+ nla_total_size(1)    /* OVS_NSH_KEY_ATTR_NEXT_PROTO */
++		+ nla_total_size(1)    /* OVS_NSH_KEY_ATTR_NSI */
++		+ nla_total_size(4)    /* OVS_NSH_KEY_ATTR_NSP */
++		+ nla_total_size(4)    /* OVS_NSH_KEY_ATTR_NSHC1 */
++		+ nla_total_size(4)    /* OVS_NSH_KEY_ATTR_NSHC2 */
++		+ nla_total_size(4)    /* OVS_NSH_KEY_ATTR_NSHC3 */
++		+ nla_total_size(4)    /* OVS_NSH_KEY_ATTR_NSHC4 */
++		+ nla_total_size(256); /* OVS_NSH_KEY_ATTR_METADATA */
++}
++
+ size_t ovs_key_attr_size(void)
+ {
+ 	/* Whenever adding new OVS_KEY_ FIELDS, we should consider
+ 	 * updating this function.
+ 	 */
+-	BUILD_BUG_ON(OVS_KEY_ATTR_TUNNEL_INFO != 26);
++	BUILD_BUG_ON(OVS_KEY_ATTR_TUNNEL_INFO != 27);
+ 
+ 	return    nla_total_size(4)   /* OVS_KEY_ATTR_PRIORITY */
+ 		+ nla_total_size(0)   /* OVS_KEY_ATTR_TUNNEL */
+@@ -298,6 +312,8 @@ size_t ovs_key_attr_size(void)
+ 		+ nla_total_size(12)  /* OVS_KEY_ATTR_ETHERNET */
+ 		+ nla_total_size(2)   /* OVS_KEY_ATTR_ETHERTYPE */
+ 		+ nla_total_size(4)   /* OVS_KEY_ATTR_VLAN */
++		+ nla_total_size(0)   /* OVS_KEY_ATTR_NSH */
++		+ ovs_nsh_key_attr_size()
+ 		+ nla_total_size(0)   /* OVS_KEY_ATTR_ENCAP */
+ 		+ nla_total_size(2)   /* OVS_KEY_ATTR_ETHERTYPE */
+ 		+ nla_total_size(40)  /* OVS_KEY_ATTR_IPV6 */
+@@ -327,6 +343,19 @@ static const struct ovs_len_tbl ovs_tunnel_key_lens[OVS_TUNNEL_KEY_ATTR_MAX + 1]
+ 	[OVS_TUNNEL_KEY_ATTR_IPV6_DST]      = { .len = sizeof(struct in6_addr) },
+ };
+ 
++static const struct ovs_len_tbl ovs_nsh_key_lens[OVS_NSH_KEY_ATTR_MAX + 1] = {
++    [OVS_NSH_KEY_ATTR_FLAGS]            = { .len = 1 },
++    [OVS_NSH_KEY_ATTR_MD_TYPE]          = { .len = 1 },
++    [OVS_NSH_KEY_ATTR_NEXT_PROTO]       = { .len = 1 },
++    [OVS_NSH_KEY_ATTR_NSI]              = { .len = 1 },
++    [OVS_NSH_KEY_ATTR_NSP]              = { .len = 4 },
++    [OVS_NSH_KEY_ATTR_NSHC1]            = { .len = 4 },
++    [OVS_NSH_KEY_ATTR_NSHC2]            = { .len = 4 },
++    [OVS_NSH_KEY_ATTR_NSHC3]            = { .len = 4 },
++    [OVS_NSH_KEY_ATTR_NSHC4]            = { .len = 4 },
++    [OVS_NSH_KEY_ATTR_METADATA]         = { .len = OVS_ATTR_VARIABLE },
++};
++
+ /* The size of the argument for each %OVS_KEY_ATTR_* Netlink attribute.  */
+ static const struct ovs_len_tbl ovs_key_lens[OVS_KEY_ATTR_MAX + 1] = {
+ 	[OVS_KEY_ATTR_ENCAP]	 = { .len = OVS_ATTR_NESTED },
+@@ -350,6 +379,8 @@ static const struct ovs_len_tbl ovs_key_lens[OVS_KEY_ATTR_MAX + 1] = {
+ 	[OVS_KEY_ATTR_DP_HASH]	 = { .len = sizeof(u32) },
+ 	[OVS_KEY_ATTR_TUNNEL]	 = { .len = OVS_ATTR_NESTED,
+ 				     .next = ovs_tunnel_key_lens, },
++	[OVS_KEY_ATTR_NSH]	 = { .len = OVS_ATTR_NESTED,
++				     .next = ovs_nsh_key_lens, },
+ 	[OVS_KEY_ATTR_MPLS]	 = { .len = sizeof(struct ovs_key_mpls) },
+ 	[OVS_KEY_ATTR_CT_STATE]	 = { .len = sizeof(u32) },
+ 	[OVS_KEY_ATTR_CT_ZONE]	 = { .len = sizeof(u16) },
+@@ -990,6 +1021,168 @@ static int l2_from_nlattrs(struct net *net, struct sw_flow_match *match,
+ 	return 0;
+ }
+ 
++static int nsh_from_nlattr(const struct nlattr *attr,
++				struct sw_flow_match *match, bool is_mask,
++				bool log)
++{
++	struct nlattr *a;
++	int rem;
++
++	nla_for_each_nested(a, attr, rem) {
++		int type = nla_type(a);
++		int err;
++
++		if (type > OVS_NSH_KEY_ATTR_MAX) {
++			OVS_NLERR(log, "NSH attr %d out of range max %d",
++					type, OVS_NSH_KEY_ATTR_MAX);
++			return -EINVAL;
++		}
++
++		if (!check_attr_len(nla_len(a),
++				ovs_nsh_key_lens[type].len)) {
++			OVS_NLERR(log, "NSH attr %d has unexpected len %d"
++				" expected %d",	type, nla_len(a),
++				ovs_nsh_key_lens[type].len);
++			return -EINVAL;
++		}
++
++		switch (type) {
++		case OVS_NSH_KEY_ATTR_FLAGS:
++			SW_FLOW_KEY_PUT(match, nsh.flags,
++					nla_get_u8(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_MD_TYPE:
++			SW_FLOW_KEY_PUT(match, nsh.md_type,
++					nla_get_u8(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NEXT_PROTO:
++			SW_FLOW_KEY_PUT(match, nsh.next_proto,
++					nla_get_u8(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSI:
++			SW_FLOW_KEY_PUT(match, nsh.nsi,
++					nla_get_u8(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSP:
++			SW_FLOW_KEY_PUT(match, nsh.nsp,
++					nla_get_be32(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSHC1:
++			SW_FLOW_KEY_PUT(match, nsh.nshc1,
++					nla_get_be32(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSHC2:
++			SW_FLOW_KEY_PUT(match, nsh.nshc2,
++					nla_get_be32(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSHC3:
++			SW_FLOW_KEY_PUT(match, nsh.nshc3,
++					nla_get_be32(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_NSHC4:
++			SW_FLOW_KEY_PUT(match, nsh.nshc4,
++					nla_get_be32(a), is_mask);
++			break;
++		case OVS_NSH_KEY_ATTR_METADATA:
++			err = genev_tun_opt_from_nlattr(a, match, is_mask, log);
++			if (err)
++				return err;
++			break;
++		default:
++			OVS_NLERR(log, "Unknown NSH attribute %d",
++					type);
++			return -EINVAL;
++		}
++	}
++
++	if (rem > 0) {
++		OVS_NLERR(log, "NSH attribute has %d unknown bytes.",
++				rem);
++		return -EINVAL;
++	}
++
++	if (!is_mask) {
++		if (!match->key->nsh.md_type) {
++			OVS_NLERR(log, "NSH Header MD Type is zero");
++			return -EINVAL;
++		}
++	}
++
++	return 0;
++}
++
++static int __nsh_to_nlattr(struct sk_buff *skb,
++			   const struct ovs_nsh_key *output,
++			   const void *tun_opts,
++			   int swkey_tun_opts_len)
++{
++
++	if (output->flags &&
++	    nla_put_u8(skb, OVS_NSH_KEY_ATTR_FLAGS,
++			    output->flags))
++		return -EMSGSIZE;
++	if (nla_put_u8(skb, OVS_NSH_KEY_ATTR_MD_TYPE,
++			    output->md_type))
++		return -EMSGSIZE;
++	if (output->next_proto &&
++	    nla_put_u8(skb, OVS_NSH_KEY_ATTR_NEXT_PROTO,
++			    output->next_proto))
++		return -EMSGSIZE;
++	if (output->nsi &&
++	    nla_put_u8(skb, OVS_NSH_KEY_ATTR_NSI,
++			    output->nsi))
++		return -EMSGSIZE;
++	if (output->nsp &&
++	    nla_put_be32(skb, OVS_NSH_KEY_ATTR_NSP,
++			    output->nsp))
++		return -EMSGSIZE;
++	if (output->md_type == 0x1) { /* NSH_M_TYPE1 */
++		if (output->nshc1 &&
++		    nla_put_be32(skb, OVS_NSH_KEY_ATTR_NSHC1,
++				    output->nshc1))
++			return -EMSGSIZE;
++		if (output->nshc2 &&
++		    nla_put_be32(skb, OVS_NSH_KEY_ATTR_NSHC2,
++				    output->nshc2))
++			return -EMSGSIZE;
++		if (output->nshc3 &&
++		    nla_put_be32(skb, OVS_NSH_KEY_ATTR_NSHC3,
++				    output->nshc3))
++			return -EMSGSIZE;
++		if (output->nshc4 &&
++		    nla_put_be32(skb, OVS_NSH_KEY_ATTR_NSHC4,
++				    output->nshc4))
++			return -EMSGSIZE;
++	} else if (output->md_type == 0x2) { /* NSH_M_TYPE2 */
++		if (swkey_tun_opts_len && tun_opts) {
++			if (nla_put(skb, OVS_NSH_KEY_ATTR_METADATA,
++			    swkey_tun_opts_len, tun_opts))
++				return -EMSGSIZE;
++		}
++	}
++	return 0;
++}
++
++static int nsh_to_nlattr(struct sk_buff *skb,
++			 const struct ovs_nsh_key *output,
++			 const void *tun_opts,
++			 int swkey_tun_opts_len)
++{
++	struct nlattr *nla;
++	int err;
++
++	nla = nla_nest_start(skb, OVS_KEY_ATTR_NSH);
++	if (!nla)
++		return -EMSGSIZE;
++
++	err = __nsh_to_nlattr(skb, output, tun_opts, swkey_tun_opts_len);
++	if (err)
++		return err;
++
++	nla_nest_end(skb, nla);
++	return 0;
++}
++
+ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
+ 				u64 attrs, const struct nlattr **a,
+ 				bool is_mask, bool log)
+@@ -1000,8 +1193,16 @@ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
+ 	err = metadata_from_nlattrs(net, match, &attrs, a, is_mask, log);
+ 	if (err < 0)
+ 		return err;
+-	is_layer3 = err != 0;
+ 
++	if (attrs & (1 << OVS_KEY_ATTR_NSH)) {
++		if (nsh_from_nlattr(a[OVS_KEY_ATTR_NSH], match,
++					 is_mask, log) < 0) {
++			return -EINVAL;
++		}
++		attrs &= ~(1 << OVS_KEY_ATTR_NSH);
++	}
++
++	is_layer3 = err != 0;
+ 	if (!is_layer3) {
+ 		err = l2_from_nlattrs(net, match, &attrs, a, is_mask, log);
+ 		if (err < 0)
+@@ -1491,6 +1692,17 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
+ 			goto nla_put_failure;
+ 	}
+ 
++	if ((swkey->nsh.md_type)) {
++		const void *opts = NULL;
++
++                /* NSH_M_TYPE2 */
++		if (swkey->nsh.md_type == 0x2 && swkey->tun_opts_len > 0) 
++			opts = TUN_METADATA_OPTS(output, swkey->tun_opts_len);
++
++		if (nsh_to_nlattr(skb, &output->nsh, opts, swkey->tun_opts_len))
++			goto nla_put_failure;
++	}
++
+ 	if (swkey->phy.in_port == DP_MAX_PORTS) {
+ 		if (is_mask && (output->phy.in_port == 0xffff))
+ 			if (nla_put_u32(skb, OVS_KEY_ATTR_IN_PORT, 0xffffffff))
+-- 
+1.8.4.2
+

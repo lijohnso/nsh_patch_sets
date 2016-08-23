@@ -1,0 +1,233 @@
+From aad79ca0297ddf77c0675ca2fc07a74da158432f Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Tue, 23 Aug 2016 09:28:52 +0000
+Subject: [PATCH 3/4] parse NSH key in key_extract of openvswitch
+
+Parse the Network Service Header to fullfill the fields in the
+struct sw_flow_key.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/include/net/nsh.h b/include/net/nsh.h
+new file mode 100644
+index 0000000..00cab48
+--- /dev/null
++++ b/include/net/nsh.h
+@@ -0,0 +1,125 @@
++#ifndef __NET_NSH_H
++#define __NET_NSH_H 1
++
++#include <asm/byteorder.h>
++
++/*
++ * Network Service Header:
++ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++ * |Ver|O|C|R|R|R|R|R|R|    Length   |   MD Type   |  Next Proto   |
++ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++ * |                Service Path ID                | Service Index |
++ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++ * |                                                               |
++ * ~               Mandatory/Optional Context Header               ~
++ * |                                                               |
++ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
++ * Ver = The version field is used to ensure backward compatibility
++ *       going forward with future NSH updates.  It MUST be set to 0x0
++ *       by the sender, in this first revision of NSH.
++ *
++ * O = OAM. when set to 0x1 indicates that this packet is an operations
++ *     and management (OAM) packet.  The receiving SFF and SFs nodes
++ *     MUST examine the payload and take appropriate action.
++ *
++ * C = context. Indicates that a critical metadata TLV is present.
++ *
++ * Length : total length, in 4-byte words, of NSH including the Base
++ *          Header, the Service Path Header and the optional variable
++ *          TLVs.
++ * MD Type: indicates the format of NSH beyond the mandatory Base Header
++ *          and the Service Path Header.
++ *
++ * Next Protocol: indicates the protocol type of the original packet. A
++ *          new IANA registry will be created for protocol type.
++ *
++ * Service Path Identifier (SPI): identifies a service path.
++ *          Participating nodes MUST use this identifier for Service
++ *          Function Path selection.
++ *
++ * Service Index (SI): provides location within the SFP.
++ *
++ * [0] https://tools.ietf.org/html/draft-ietf-sfc-nsh-01
++ */
++struct nsh_base {
++#if defined(__LITTLE_ENDIAN_BITFIELD)
++	__u8    reserved_flags1:4;
++	__u8    context_flag:1;
++	__u8    oam_flag:1;
++	__u8    version:2;
++
++	__u8    length:6;
++	__u8    reserved_flags2:2;
++#elif defined(__BIG_ENDIAN_BITFIELD)
++	__u8    version:2;
++	__u8    oam_flag:1;
++	__u8    context_flag:1;
++	__u8    reserved_flags1:4;
++
++	__u8    reserved_flags2:2;
++	__u8    length:6;
++#else
++#error "Bitfield Endianess not defined."
++#endif
++	__u8    md_type;
++	__u8    next_proto;
++	union {
++		struct {
++			__u8    svc_path[3];
++			__u8    svc_idx;
++		};
++		__be32 path_hdr;
++	};
++};
++
++/**
++ * struct nsh_md1_ctx - Keeps track of NSH context data
++ * @nshc<1-4>: NSH Contexts.
++ */
++struct nsh_md1_ctx {
++	__be32 nshc1;
++	__be32 nshc2;
++	__be32 nshc3;
++	__be32 nshc4;
++};
++
++struct nsh_md2_ctx {
++	__be16 md_class;
++	uint8_t type;
++	uint8_t length;
++	uint8_t md_value[];
++};
++
++/**
++ * struct nshdr - Network Service header
++ * @base: Network Service Base Header.
++ * @ctx: Network Service Context Header.
++ */
++struct nsh_hdr {
++	struct nsh_base base;
++	__be32 ctx[0]; /* Mandatory/optional Context Header */
++};
++
++#define NSH_DST_PORT    4790   /* UDP Port for NSH on VXLAN */
++#define ETH_P_NSH       0x894F   /* Ethertype for NSH */
++
++/* NSH Base Header Next Protocol */
++#define NSH_P_IPV4        0x01
++#define NSH_P_IPV6        0x02
++#define NSH_P_ETHERNET    0x03
++
++/* MD Type Registry */
++#define NSH_M_TYPE1     0x01
++#define NSH_M_TYPE2     0x02
++#define NSH_M_EXP1      0xFE
++#define NSH_M_EXP2      0xFF
++
++/* Used for masking nsp and nsi values in field nsp below */
++#define NSH_M_NSP   0x00FFFFFF
++#define NSH_M_NSI   0xFF000000
++
++/* sizeof(struct nsh_hdr) + sizeof(struct nsh_md1_ctx) */
++#define NSH_M_TYPE1_LEN     24
++#define NSH_LEN_MAX	    256
++
++#endif
+diff --git a/net/openvswitch/flow.c b/net/openvswitch/flow.c
+index 3a593e8..c430a08 100644
+--- a/net/openvswitch/flow.c
++++ b/net/openvswitch/flow.c
+@@ -45,6 +45,7 @@
+ #include <net/ipv6.h>
+ #include <net/mpls.h>
+ #include <net/ndisc.h>
++#include <net/nsh.h>
+ 
+ #include "conntrack.h"
+ #include "datapath.h"
+@@ -436,6 +437,43 @@ invalid:
+ 	return 0;
+ }
+ 
++static int parse_nsh(struct sk_buff *skb, struct sw_flow_key *key)
++{
++	struct nsh_hdr *nsh_hdr = (struct nsh_hdr *)skb_mac_header(skb);
++	uint16_t retval = -1;
++	uint16_t length = 0; /* For MD type 2 support */
++
++	retval = nsh_hdr->base.length << 2;
++	if (retval > NSH_LEN_MAX)
++		return -EINVAL;
++
++	key->nsh.md_type = nsh_hdr->base.md_type;
++	key->nsh.next_proto = nsh_hdr->base.next_proto;
++	key->nsh.nsi = nsh_hdr->base.svc_idx;
++	key->nsh.nsp = nsh_hdr->base.path_hdr << 8;
++
++	if (nsh_hdr->base.md_type == NSH_M_TYPE1) {
++		struct nsh_md1_ctx *ctx = (struct nsh_md1_ctx *)(nsh_hdr->ctx);
++
++		key->nsh.nshc1 = ctx->nshc1;
++		key->nsh.nshc2 = ctx->nshc2;
++		key->nsh.nshc3 = ctx->nshc3;
++		key->nsh.nshc4 = ctx->nshc4;
++        } else if (nsh_hdr->base.md_type == NSH_M_TYPE2) {
++		/* Todo: Add full support for MD type 2.
++                 * Just prototype with TUN_METADATA APIs here.
++                 */
++		struct nsh_md2_ctx *ctx = (struct nsh_md2_ctx *)(nsh_hdr->ctx);
++		length = retval - sizeof *nsh_hdr;
++
++		memcpy(TUN_METADATA_OPTS(key, length), ctx, length);
++		key->tun_opts_len = length;
++        }
++
++	__skb_pull(skb, retval);
++	return retval;
++}
++
+ /**
+  * key_extract - extracts a flow key from an Ethernet frame.
+  * @skb: sk_buff that contains the frame, with skb->data pointing to the
+@@ -460,7 +498,7 @@ invalid:
+  */
+ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
+ {
+-	int error;
++	int error, nsh_len = -1;
+ 
+ 	/* Flags are always used as part of stats */
+ 	key->tp.flags = 0;
+@@ -501,6 +539,11 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
+ 
+ 	/* Network Service Header */
+ 	memset(&(key->nsh), 0, sizeof(key->nsh));
++	if (key->eth.type == htons(ETH_P_NSH)) {
++		nsh_len = parse_nsh(skb, key);
++		if (unlikely(nsh_len < 0))
++			return -EINVAL;
++	}
+ 
+ 	/* Network layer. */
+ 	if (key->eth.type == htons(ETH_P_IP)) {
+@@ -692,6 +735,11 @@ static int key_extract(struct sk_buff *skb, struct sw_flow_key *key)
+ 			}
+ 		}
+ 	}
++
++	if (nsh_len > 0) {
++		__skb_push(skb, nsh_len);
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+1.8.4.2
+

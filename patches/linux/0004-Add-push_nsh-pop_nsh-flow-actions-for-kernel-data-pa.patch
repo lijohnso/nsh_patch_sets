@@ -1,0 +1,184 @@
+From a58d7ccc33044913b318d9f92a6034b089a0bb0d Mon Sep 17 00:00:00 2001
+From: "Johnson.Li" <johnson.li@intel.com>
+Date: Tue, 23 Aug 2016 09:41:33 +0000
+Subject: [PATCH 4/4] Add push_nsh/pop_nsh flow actions for kernel data path
+
+Network Service Header is pushed to/stripped from packets with
+the data path flow actions push_nsh and pop_nsh.
+
+Signed-off-by: Johnson.Li <johnson.li@intel.com>
+
+diff --git a/include/uapi/linux/openvswitch.h b/include/uapi/linux/openvswitch.h
+index 7a96093..37d0678 100644
+--- a/include/uapi/linux/openvswitch.h
++++ b/include/uapi/linux/openvswitch.h
+@@ -732,6 +732,17 @@ struct ovs_action_push_eth {
+ };
+ 
+ /**
++ * struct ovs_action_push_nsh - %OVS_ACTION_ATTR_PUSH_NSH action argument.
++ * @len: length of NSH header. Differs since different metadata type.
++ * @header: RAW value for the NSH header.
++ */
++#define NSH_HEADER_LEN_MAX	256
++struct ovs_action_push_nsh {
++	uint16_t len;
++	uint8_t header[NSH_HEADER_LEN_MAX]; /* NSH header */
++};
++
++/**
+  * enum ovs_action_attr - Action types.
+  *
+  * @OVS_ACTION_ATTR_OUTPUT: Output packet to port.
+@@ -766,6 +777,9 @@ struct ovs_action_push_eth {
+  * @OVS_ACTION_ATTR_PUSH_ETH: Push a new outermost Ethernet header onto the      * packet.
+  * @OVS_ACTION_ATTR_POP_ETH: Pop the outermost Ethernet header off the packet.
+  *
++ * @OVS_ACTION_ATTR_PUSH_NSH: Append a Network Service Header before
++ * original packet.
++ * @OVS_ACTION_ATTR_POP_NSH: Strip the Network Service Header from packet.
+  * Only a single header can be set with a single %OVS_ACTION_ATTR_SET.  Not all
+  * fields within a header are modifiable, e.g. the IPv4 protocol and fragment
+  * type may not be changed.
+@@ -794,6 +808,8 @@ enum ovs_action_attr {
+ 	OVS_ACTION_ATTR_TRUNC,        /* u32 struct ovs_action_trunc. */
+ 	OVS_ACTION_ATTR_PUSH_ETH,     /* struct ovs_action_push_eth. */
+ 	OVS_ACTION_ATTR_POP_ETH,      /* No argument. */
++	OVS_ACTION_ATTR_PUSH_NSH,     /* struct ovs_action_push_nsh. */
++	OVS_ACTION_ATTR_POP_NSH,      /* No argument. */
+ 
+ 	__OVS_ACTION_ATTR_MAX,	      /* Nothing past this will be accepted
+ 				       * from userspace. */
+diff --git a/net/openvswitch/actions.c b/net/openvswitch/actions.c
+index 0001f65..b84d77e 100644
+--- a/net/openvswitch/actions.c
++++ b/net/openvswitch/actions.c
+@@ -29,6 +29,7 @@
+ #include <linux/in6.h>
+ #include <linux/if_arp.h>
+ #include <linux/if_vlan.h>
++#include <linux/if_ether.h>
+ 
+ #include <net/dst.h>
+ #include <net/ip.h>
+@@ -38,6 +39,7 @@
+ #include <net/dsfield.h>
+ #include <net/mpls.h>
+ #include <net/sctp/checksum.h>
++#include <net/nsh.h>
+ 
+ #include "datapath.h"
+ #include "flow.h"
+@@ -265,6 +267,68 @@ static int push_vlan(struct sk_buff *skb, struct sw_flow_key *key,
+ 			     ntohs(vlan->vlan_tci) & ~VLAN_TAG_PRESENT);
+ }
+ 
++static int pop_nsh(struct sk_buff *skb, struct sw_flow_key *key)
++{
++	struct nsh_hdr *nsh_hdr = NULL;
++	uint16_t length = 0;
++
++	nsh_hdr = (struct nsh_hdr *)(skb->data);
++	length  = nsh_hdr->base.length << 2;
++
++	switch (nsh_hdr->base.next_proto) {
++	case NSH_P_IPV4:
++		skb->protocol = htons(ETH_P_IP);
++		key->eth.type = htons(ETH_P_IP);
++		break;
++	case NSH_P_IPV6:
++		skb->protocol = htons(ETH_P_IPV6);
++		key->eth.type = htons(ETH_P_IPV6);
++		break;
++	case NSH_P_ETHERNET:
++		skb->protocol = htons(ETH_P_TEB);
++		key->phy.is_layer3 = false;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	__skb_pull(skb, length);
++	skb_reset_mac_header(skb);
++	skb_reset_network_header(skb);
++	skb_reset_transport_header(skb);
++
++	skb_reset_mac_len(skb);
++
++	memset(&key->nsh, 0, sizeof(key->nsh));
++
++	return 0;
++}
++
++static int push_nsh(struct sk_buff *skb, struct sw_flow_key *key,
++		     const struct ovs_action_push_nsh *nsh)
++{
++	if (nsh->len > 0 && nsh->len <= 256) {
++		struct nsh_hdr *nsh_hdr = NULL;
++
++		if (skb_cow_head(skb, nsh->len) < 0)
++			return -ENOMEM;
++
++		skb_push(skb, nsh->len);
++		nsh_hdr = (struct nsh_hdr *)(skb->data);
++		memcpy(nsh_hdr, nsh->header, nsh->len);
++
++		if (!skb->inner_protocol)
++			skb_set_inner_protocol(skb, skb->protocol);
++
++		skb->protocol = htons(ETH_P_NSH); /* 0x894F */
++		key->eth.type = htons(ETH_P_NSH);
++	} else {
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
+ /* 'src' is already properly masked. */
+ static void ether_addr_copy_masked(u8 *dst_, const u8 *src_, const u8 *mask_)
+ {
+@@ -1166,6 +1230,14 @@ static int do_execute_actions(struct datapath *dp, struct sk_buff *skb,
+ 			err = pop_eth(skb, key);
+ 			break;
+ 
++		case OVS_ACTION_ATTR_PUSH_NSH:
++			err = push_nsh(skb, key, nla_data(a));
++			break;
++
++		case OVS_ACTION_ATTR_POP_NSH:
++			err = pop_nsh(skb, key);
++			break;
++
+ 		case OVS_ACTION_ATTR_RECIRC:
+ 			err = execute_recirc(dp, skb, key, a, rem);
+ 			if (nla_is_last(a, rem)) {
+diff --git a/net/openvswitch/flow_netlink.c b/net/openvswitch/flow_netlink.c
+index ee0539c..3a9862e 100644
+--- a/net/openvswitch/flow_netlink.c
++++ b/net/openvswitch/flow_netlink.c
+@@ -2505,6 +2505,8 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
+ 			[OVS_ACTION_ATTR_TRUNC] = sizeof(struct ovs_action_trunc),
+ 			[OVS_ACTION_ATTR_PUSH_ETH] = sizeof(struct ovs_action_push_eth),
+ 			[OVS_ACTION_ATTR_POP_ETH] = 0,
++			[OVS_ACTION_ATTR_PUSH_NSH] = sizeof(struct ovs_action_push_nsh),
++			[OVS_ACTION_ATTR_POP_NSH] = 0,
+ 		};
+ 		const struct ovs_action_push_vlan *vlan;
+ 		int type = nla_type(a);
+@@ -2655,6 +2657,12 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
+ 			is_layer3 = false;
+ 			break;
+ 
++		case OVS_ACTION_ATTR_PUSH_NSH:
++			is_layer3 = true;
++			break;
++		case OVS_ACTION_ATTR_POP_NSH:
++			break;
++
+ 		default:
+ 			OVS_NLERR(log, "Unknown Action type %d", type);
+ 			return -EINVAL;
+-- 
+1.8.4.2
+
