@@ -56,6 +56,7 @@ expect -c "
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/linux
+	git checkout l3-vpn-v11 -b verify
 	patches=`cat ${BASE_DIR}/linux_patches.list`
 	for patch_file in ${patches}
 	do
@@ -84,6 +85,7 @@ expect -c "
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/openvswitch
+	git checkout l3-vpn-v12 -b verify
 	patches=`cat ${BASE_DIR}/ovs_patches.list`
 	for patch_file in ${patches}
 	do
