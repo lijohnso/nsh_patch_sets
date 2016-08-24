@@ -128,3 +128,8 @@ Step 3: Add flow for Ingress
        this manually or just run the install.sh.
 
 3. run the basic tests.
+
+=== Note
+
+This patch set is just ported the prototype development from tag l3-vpn-10 to
+l3-vpn-v12, functionality are not fully tested. 
