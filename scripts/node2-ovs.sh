@@ -92,6 +92,19 @@ function stop_ovs() {
 	pidof ovsdb-server | xargs kill -9
 }
 
+function check_status() {
+	local pid_dbserver=`pidof ovsdb-server`
+	local pid_vswitchd=`pidof ovs-vswitchd`
+
+	if [ "${pid_dbserver}" != "" -a "${pid_vswitchd}" != "" ] ;then
+		echo -e "Open Virtaul Switch status: \e[32mRunning\e[0m"
+	elif [ "${pid_dbserver}" == "" -a "${pid_vswitchd}" == "" ] ;then
+		echo -e "Open Virtaul Switch status: \e[33mStopped\e[0m"
+	else
+		echo -e "Open Virtaul Switch status: \e[31mCrashed\e[0m"
+	fi
+}
+
 ###################### MAIN ######################
 case $1 in
 start)
@@ -100,13 +113,16 @@ start)
 stop)
 	stop_ovs
 	;;
+status)
+	check_status
+	;;
 restart)
 	stop_ovs
 	sleep 5
 	start_ovs
 	;;
 *)
-	echo "Usage: $0 [start|stop|restart]"
+	echo "Usage: $0 [start|stop|restart|status]"
 	exit 1
 	;;
 esac
