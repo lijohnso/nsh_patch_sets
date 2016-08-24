@@ -46,13 +46,7 @@ export PATH=$PATH:/usr/local/bin
 # git config --global https.proxy "https://<proxy-ip:port>"
 
 #Clone and install Linux kernel
-expect -c "
-	set timeout 60;
-	spawn git clone https://github.com/horms/linux.git ${WORK_DIR}/linux;
-	expect {
-		\"*(yes/no)?\" {send \"yes\r\"; interact}
-	}
-"
+git clone https://github.com/horms/linux.git ${WORK_DIR}/linux
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/linux
@@ -75,13 +69,7 @@ if [ "${ret}" == "0" ] ;then
 fi
 
 #Clone and install openvswitch
-expect -c "
-	set timeout 60;
-	spawn git clone https://github.com/horms/openvswitch.git ${WORK_DIR}/openvswitch;
-	expect {
-		\"*(yes/no)?\" {send \"yes\r\"; interact}
-	}
-"
+git clone https://github.com/horms/openvswitch.git ${WORK_DIR}/openvswitch
 ret=$?
 if [ "${ret}" == "0" ] ;then
 	cd ${WORK_DIR}/openvswitch
